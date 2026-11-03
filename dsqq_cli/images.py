@@ -1,18 +1,44 @@
 """Install the bundled image tool, preserving the existing model and QQ session."""
+import json
 import shutil
 import tempfile
 from pathlib import Path
 
-from .runtime import AstrBot, Docker, wait_ready
+from .runtime import AstrBot, Docker, NapCat, wait_ready
 from .state import UserError, read_json, write_json
 
 PLUGIN = "astrbot_plugin_dsqq_image"
+
+
+def tune_send_timeout(config):
+    """Raise only the send baseline; preserve user settings above our floor."""
+    timeout = config.setdefault("timeout", {})
+    timeout["baseTimeout"] = max(30000, int(timeout.get("baseTimeout", 10000)))
+    return config
+
+
+def configure_send_timeout(inst, docker):
+    # Online account config is owned by NapCat: update through its supported API.
+    if "napcat" in docker.running():
+        api = NapCat(inst)
+        config = api.call("/OB11Config/GetConfig")
+        old = config.get("timeout", {}).get("baseTimeout")
+        tune_send_timeout(config)
+        if old != config["timeout"]["baseTimeout"]:
+            api.call("/OB11Config/SetConfig", {"config": json.dumps(config)})
+        current = api.call("/OB11Config/GetConfig")
+        if current.get("timeout", {}).get("baseTimeout", 0) < 30000:
+            raise UserError("NapCat 发送等待时间未生效，请检查配置。")
+    else:
+        for path in (inst.root / "napcat/config").glob("onebot11*.json"):
+            write_json(path, tune_send_timeout(read_json(path)))
 
 
 def image_command(inst, args, repo):
     docker = Docker(inst)
     docker.check()
     if args.action == "install":
+        configure_send_timeout(inst, docker)
         source = repo / "plugins" / PLUGIN
         target = inst.root / "astrbot/data/plugins" / PLUGIN
         target.parent.mkdir(parents=True, exist_ok=True)

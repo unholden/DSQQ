@@ -111,7 +111,9 @@ def initial_napcat(config):
                             "token": config["secrets"]["onebot_token"],
                             "messagePostFormat": "array", "reportSelfMessage": False,
                             "reconnectInterval": 1000, "heartInterval": 30000, "debug": False}]},
-            "musicSignUrl": "", "enableLocalFile2Url": False, "parseMultMsg": False}
+            "musicSignUrl": "", "enableLocalFile2Url": False, "parseMultMsg": False,
+            "timeout": {"baseTimeout": 30000, "uploadSpeedKBps": 256,
+                        "downloadSpeedKBps": 256, "maxTimeout": 1800000}}
 
 
 def compose_config(config):

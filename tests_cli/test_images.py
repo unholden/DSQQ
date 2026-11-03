@@ -2,6 +2,8 @@ import asyncio
 import base64
 import importlib
 import io
+import copy
+import time
 import json
 from pathlib import Path
 import sys
@@ -15,6 +17,7 @@ from unittest.mock import AsyncMock, Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "plugins"))
 client = importlib.import_module("astrbot_plugin_dsqq_image.client")
+delivery = importlib.import_module("astrbot_plugin_dsqq_image.delivery")
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
 
 
@@ -130,6 +133,26 @@ class ImagePluginTest(unittest.IsolatedAsyncioTestCase):
         self.event = Mock()
         self.event.is_admin.return_value = True
         self.event.send = AsyncMock()
+        self.event.get_self_id.return_value = "42"
+        self.event.get_sender_id.return_value = "7"
+        self.event.get_group_id.return_value = ""
+        self.event.unified_msg_origin = "qq:private:7"
+        self.event.bot.call_action = AsyncMock(return_value={"messages": []})
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.plugin.folder = Path(self.temp.name)
+        self.path = self.plugin.folder / ("dsqq-image-" + "a" * 32 + ".png")
+        self.path.write_bytes(PNG)
+        self.delays = patch.object(delivery, "CHECK_DELAYS", (0, 0))
+        self.delays.start()
+        self.addCleanup(self.delays.stop)
+
+    def sent_row(self):
+        return {"message_id": 123, "real_seq": "14", "time": time.time(),
+                "sender": {"user_id": 42}, "message_type": "private",
+                "message_sent_type": "self", "message": [{"type": "image", "data": {
+                    "file": delivery.md5_file(self.path).upper() + ".png", "file_size": str(len(PNG))}}]}
+
 
     async def asyncTearDown(self):
         await self.plugin.terminate()
@@ -141,12 +164,12 @@ class ImagePluginTest(unittest.IsolatedAsyncioTestCase):
         self.plugin.context.get_config.assert_not_called()
 
     async def test_one_job_delivers_image_and_rejects_duplicate(self):
-        with patch.object(self.module, "generate_image", return_value=Path("/AstrBot/data/test.png")) as generate:
+        with patch.object(self.module, "generate_image", return_value=self.path) as generate:
             self.assertIn("已开始", self.plugin.start(self.event, "blue fish"))
             self.assertIn("上一张", self.plugin.start(self.event, "blue fish"))
             await self.plugin.job
             self.assertEqual(generate.call_count, 1)
-            self.event.image_result.assert_called_once_with("/AstrBot/data/test.png")
+            self.event.image_result.assert_called_once_with(str(self.path))
             self.event.send.assert_awaited_once_with(self.event.image_result.return_value)
 
     async def test_failure_notifies_without_exposing_exception(self):
@@ -167,26 +190,37 @@ class ImagePluginTest(unittest.IsolatedAsyncioTestCase):
             def __str__(self):
                 return repr(self.result)
 
-        self.event.send.side_effect = [ActionFailed(), None]
-        with patch.object(self.module, "generate_image", return_value=Path("/AstrBot/data/test.png")) as generate:
+        self.event.send.side_effect = ActionFailed()
+        self.event.bot.call_action.side_effect = [
+            {"messages": []}, {"messages": []}, {"messages": [self.sent_row()]}]
+        with patch.object(self.module, "generate_image", return_value=self.path) as generate:
             self.plugin.start(self.event, "blue fish")
             await self.plugin.job
-        message = self.event.plain_result.call_args.args[0]
-        self.assertIn("图片已生成", message)
-        self.assertIn("发送确认超时", message)
-        self.assertIn("可能已送达", message)
-        self.assertNotIn("失败", message)
+        self.event.plain_result.assert_not_called()
+        self.event.send.assert_awaited_once()
         self.assertEqual(generate.call_count, 1)
-        self.event.image_result.assert_called_once()
+        receipt = json.loads(delivery.receipt_path(self.plugin.folder, self.event).read_text())
+        self.assertEqual((receipt["status"], receipt["message_id"]), ("sent", 123))
+
+    async def test_ack_timeout_does_not_expose_transport_uncertainty(self):
+        self.event.send.side_effect = [RuntimeError(
+            "Timeout: NTEvent serviceAndMethod:NodeIKernelMsgService/sendMsg "
+            "ListenerName:NodeIKernelMsgListener/onMsgInfoListUpdate EventRet: {}"), None]
+        with patch.object(self.module, "generate_image", return_value=self.path):
+            self.plugin.start(self.event, "blue fish")
+            await self.plugin.job
+        for call in self.event.plain_result.call_args_list:
+            self.assertNotIn("确认超时", call.args[0])
+            self.assertNotIn("可能已送达", call.args[0])
 
     async def test_explicit_send_failure_keeps_generation_success(self):
         self.event.send.side_effect = [RuntimeError("invalid target secret"), None]
-        with patch.object(self.module, "generate_image", return_value=Path("/AstrBot/data/test.png")) as generate:
+        with patch.object(self.module, "generate_image", return_value=self.path) as generate:
             self.plugin.start(self.event, "blue fish")
             await self.plugin.job
         message = self.event.plain_result.call_args.args[0]
-        self.assertIn("图片已生成", message)
-        self.assertIn("QQ 发送失败", message)
+        self.assertIn("图片已做好并保存", message)
+        self.assertIn("/取图", message)
         self.assertNotIn("secret", message)
         self.assertEqual(generate.call_count, 1)
 
@@ -205,3 +239,86 @@ class ImagePluginTest(unittest.IsolatedAsyncioTestCase):
             replies = [r async for r in self.plugin.image_command(self.event)]
         start.assert_called_once_with(self.event, "a blue fish, white background")
         self.assertEqual(len(replies), 1)
+
+    async def test_history_outage_does_not_resend_or_regenerate(self):
+        self.event.bot.call_action.side_effect = ConnectionError("private detail")
+        self.event.send.side_effect = [TimeoutError(), None]
+        with patch.object(self.module, "generate_image", return_value=self.path) as generate:
+            await self.plugin.generate_and_send(self.event, "fish", "base", "key")
+        self.event.image_result.assert_called_once()
+        self.assertEqual(generate.call_count, 1)
+        self.assertIn("/取图", self.event.plain_result.call_args.args[0])
+        self.assertEqual(delivery.latest_image(self.plugin.folder, self.event), self.path)
+
+    async def test_explicit_retrieve_uses_existing_file(self):
+        delivery.save_receipt(self.plugin.folder, self.event, self.path, "saved")
+        with patch.object(self.module, "generate_image") as generate:
+            replies = [r async for r in self.plugin.retrieve_command(self.event)]
+            await self.plugin.job
+        generate.assert_not_called()
+        self.assertEqual(len(replies), 1)
+        self.event.image_result.assert_called_once_with(str(self.path))
+
+    async def test_retrieve_is_scoped_and_admin_only(self):
+        delivery.save_receipt(self.plugin.folder, self.event, self.path, "saved")
+        self.event.is_admin.return_value = False
+        _ = [r async for r in self.plugin.retrieve_command(self.event)]
+        self.assertIsNone(self.plugin.job)
+        self.event.is_admin.return_value = True
+        self.event.unified_msg_origin = "qq:group:99"
+        _ = [r async for r in self.plugin.retrieve_command(self.event)]
+        self.assertIsNone(self.plugin.job)
+        self.event.send.assert_not_called()
+
+    async def test_receipt_cannot_escape_image_directory(self):
+        receipt = delivery.receipt_path(self.plugin.folder, self.event)
+        for name in ("../secret", "/etc/passwd", "anything.png"):
+            receipt.write_text(json.dumps({"image": name}))
+            self.assertIsNone(delivery.latest_image(self.plugin.folder, self.event))
+
+    async def test_cancellation_stops_reconciliation(self):
+        self.event.bot.call_action.side_effect = asyncio.CancelledError()
+        with self.assertRaises(asyncio.CancelledError):
+            await delivery.reconcile_delivery(self.event, delivery.target_for(self.event))
+
+    async def test_only_new_server_sequenced_matching_image_confirms(self):
+        ticket = await delivery.prepare_delivery(self.event, self.path)
+        row = self.sent_row()
+        self.assertIs(delivery.matching_message({"messages": [row]}, ticket), row)
+        variants = [{"real_seq": "0"}, {"time": ticket["started_at"] - 10},
+                    {"sender": {"user_id": "7"}}, {"target_id": "8"},
+                    {"message_type": "group"}, {"message_sent_type": "pending"},
+                    {"message": [{"type": "image", "data": {"file": "0" * 32 + ".png"}}]},
+                    {"message": [{"type": "image", "data": {
+                        "file": delivery.md5_file(self.path), "file_size": "999999"}}]}]
+        for change in variants:
+            with self.subTest(change=change):
+                self.assertIsNone(delivery.matching_message({"messages": [{**row, **change}]}, ticket))
+        ticket["before_ids"] = {"123"}
+        self.assertIsNone(delivery.matching_message({"messages": [row]}, ticket))
+        ticket.update(kind="group", target_id="88", before_ids=set())
+        row.update(message_type="group", group_id="88")
+        self.assertIsNotNone(delivery.matching_message({"data": {"messages": [row]}}, ticket))
+        row["group_id"] = "99"
+        self.assertIsNone(delivery.matching_message({"messages": [row]}, ticket))
+
+
+class TimeoutPolicyTest(unittest.TestCase):
+    def test_preserves_other_config_and_longer_user_timeouts(self):
+        from dsqq_cli.images import tune_send_timeout
+        original = {"network": {"token": "secret"}, "timeout": {
+            "baseTimeout": 10000, "uploadSpeedKBps": 256, "maxTimeout": 1800000}}
+        tuned = tune_send_timeout(copy.deepcopy(original))
+        expected = copy.deepcopy(original)
+        expected["timeout"]["baseTimeout"] = 30000
+        self.assertEqual(tuned, expected)
+        tuned["timeout"]["baseTimeout"] = 90000
+        self.assertEqual(tune_send_timeout(tuned)["timeout"]["baseTimeout"], 90000)
+
+    def test_recorded_images_fit_new_wait_budget(self):
+        from dsqq_cli.images import tune_send_timeout
+        base = tune_send_timeout({})["timeout"]["baseTimeout"] / 1000
+        for size, elapsed in ((1686984, 27), (2806109, 32)):
+            upload = size / 1024 / 256
+            self.assertLess(10 + upload, elapsed)
+            self.assertGreater(base + upload, elapsed)
