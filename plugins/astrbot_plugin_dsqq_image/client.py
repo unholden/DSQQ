@@ -77,8 +77,16 @@ def save_response(payload, folder, timeout=60):
         # Deliberately separate opener/request: no Authorization header on CDN requests.
         url = public_image_url(item["url"])
         opener = urllib.request.build_opener(PublicRedirect(), urllib.request.ProxyHandler({}))
-        with opener.open(urllib.request.Request(url), timeout=timeout) as response:
-            data = read_bounded(response, MAX_IMAGE_BYTES)
+        request = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; DSQQImage/0.1)",
+            "Accept": "image/png,image/jpeg,image/webp,image/*;q=0.8,*/*;q=0.5",
+        })
+        try:
+            with opener.open(request, timeout=timeout) as response:
+                data = read_bounded(response, MAX_IMAGE_BYTES)
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            raise ImageError(f"图片已生成，但下载返回 HTTP {exc.code}；请检查图片下载服务，不要重复生图。") from exc
     else:
         raise ImageError("生图接口没有返回图片 URL 或图片编码。")
     if len(data) > MAX_IMAGE_BYTES:
@@ -114,6 +122,7 @@ def generate_image(base_url, api_key, model, prompt, folder, timeout=300):
     except ImageError:
         raise
     except urllib.error.HTTPError as exc:
+        exc.close()
         raise ImageError(f"生图或图片下载接口返回 HTTP {exc.code}，请检查网关模型与额度。") from exc
     except (OSError, ValueError, TypeError) as exc:
         raise ImageError("生图请求失败或超时；没有自动重试，请稍后查看是否已扣费再决定重试。") from exc

@@ -57,6 +57,18 @@ class ImageClientTest(unittest.TestCase):
             self.assertEqual(p.read_bytes(), PNG)
         req = opener.open.call_args.args[0]
         self.assertIsNone(req.get_header("Authorization"))
+        self.assertIn("DSQQImage", req.get_header("User-agent"))
+        self.assertIn("image/png", req.get_header("Accept"))
+
+    def test_cdn_failure_does_not_suggest_regenerating(self):
+        opener = Mock()
+        opener.open.side_effect = client.urllib.error.HTTPError("https://cdn.example/x", 403, "denied", {}, None)
+        with patch.object(client, "public_image_url", side_effect=lambda x: x), \
+                patch.object(client.urllib.request, "build_opener", return_value=opener):
+            with self.assertRaises(client.ImageError) as caught:
+                client.save_response({"data": [{"url": "https://cdn.example/x"}]}, "/unused")
+        self.assertIn("图片已生成", str(caught.exception))
+        self.assertEqual(opener.open.call_count, 1)
 
     def test_reject_private_urls_including_redirect(self):
         private = [(2, 1, 6, "", ("127.0.0.1", 443))]
