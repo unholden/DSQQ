@@ -157,6 +157,48 @@ class ImagePluginTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret", message)
         self.event.send.assert_awaited_once()
 
+    async def test_send_timeout_is_not_reported_as_generation_failure(self):
+        # Match aiocqhttp.ActionFailed's result shape and repr-only error contract.
+        class ActionFailed(Exception):
+            result = {"retcode": 1200, "wording": (
+                "Timeout: NTEvent serviceAndMethod:NodeIKernelMsgService/sendMsg "
+                "ListenerName:NodeIKernelMsgListener/onMsgInfoListUpdate EventRet: {}")}
+
+            def __str__(self):
+                return repr(self.result)
+
+        self.event.send.side_effect = [ActionFailed(), None]
+        with patch.object(self.module, "generate_image", return_value=Path("/AstrBot/data/test.png")) as generate:
+            self.plugin.start(self.event, "blue fish")
+            await self.plugin.job
+        message = self.event.plain_result.call_args.args[0]
+        self.assertIn("图片已生成", message)
+        self.assertIn("发送确认超时", message)
+        self.assertIn("可能已送达", message)
+        self.assertNotIn("失败", message)
+        self.assertEqual(generate.call_count, 1)
+        self.event.image_result.assert_called_once()
+
+    async def test_explicit_send_failure_keeps_generation_success(self):
+        self.event.send.side_effect = [RuntimeError("invalid target secret"), None]
+        with patch.object(self.module, "generate_image", return_value=Path("/AstrBot/data/test.png")) as generate:
+            self.plugin.start(self.event, "blue fish")
+            await self.plugin.job
+        message = self.event.plain_result.call_args.args[0]
+        self.assertIn("图片已生成", message)
+        self.assertIn("QQ 发送失败", message)
+        self.assertNotIn("secret", message)
+        self.assertEqual(generate.call_count, 1)
+
+    async def test_generation_timeout_does_not_claim_image_exists(self):
+        with patch.object(self.module, "generate_image", side_effect=TimeoutError("private detail")):
+            self.plugin.start(self.event, "blue fish")
+            await self.plugin.job
+        message = self.event.plain_result.call_args.args[0]
+        self.assertNotIn("图片已生成", message)
+        self.assertNotIn("private detail", message)
+        self.event.image_result.assert_not_called()
+
     async def test_command_keeps_full_prompt(self):
         self.event.message_str = "/生图 a blue fish, white background"
         with patch.object(self.plugin, "start", return_value="started") as start:

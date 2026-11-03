@@ -9,6 +9,15 @@ from .client import ImageError, generate_image
 NAME = "astrbot_plugin_dsqq_image"
 
 
+def send_confirmation_timed_out(exc):
+    if isinstance(exc, TimeoutError):
+        return True
+    result = getattr(exc, "result", None)
+    detail = " ".join(str(result.get(k, "")) for k in ("message", "wording")) if isinstance(result, dict) else str(exc)
+    detail = detail.lower()
+    return "timeout: ntevent" in detail and "nodeikernelmsgservice/sendmsg" in detail
+
+
 class DSQQImage(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
@@ -61,6 +70,7 @@ class DSQQImage(Star):
         yield event.plain_result(self.start(event, text[1] if len(text) > 1 else ""))
 
     async def generate_and_send(self, event, prompt, base, key):
+        path = None
         try:
             path = await asyncio.to_thread(generate_image, base, key,
                                           self.config.get("model", "gpt-image-2"), prompt,
@@ -71,8 +81,16 @@ class DSQQImage(Star):
             raise
         except Exception as exc:
             # Never log raw upstream responses, prompts, signed URLs or credentials.
-            logger.warning(f"[dsqq_image] Image job failed ({type(exc).__name__}).")
-            message = str(exc) if isinstance(exc, ImageError) else "图片生成或发送失败，请稍后重试。"
+            if path is not None:
+                if send_confirmation_timed_out(exc):
+                    logger.warning("[dsqq_image] Image generated; QQ delivery acknowledgment timed out. Not retrying.")
+                    message = "图片已生成，QQ 发送确认超时，可能已送达。若已收到请忽略，无需重新生图。"
+                else:
+                    logger.warning(f"[dsqq_image] Image generated; QQ delivery failed ({type(exc).__name__}).")
+                    message = "图片已生成，但 QQ 发送失败；图片文件已保留，无需重新生图。"
+            else:
+                logger.warning(f"[dsqq_image] Image generation failed ({type(exc).__name__}).")
+                message = str(exc) if isinstance(exc, ImageError) else "图片生成失败或超时；没有自动重试，请稍后查看是否已扣费再决定重试。"
             try:
                 await event.send(event.plain_result(message))
             except Exception:
