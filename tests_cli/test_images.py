@@ -62,7 +62,7 @@ class ImageClientTest(unittest.TestCase):
 
     def test_cdn_failure_does_not_suggest_regenerating(self):
         opener = Mock()
-        opener.open.side_effect = client.urllib.error.HTTPError("https://cdn.example/x", 403, "denied", {}, None)
+        opener.open.side_effect = client.urllib.error.HTTPError("https://cdn.example/x", 403, "denied", {}, io.BytesIO(b"denied"))
         with patch.object(client, "public_image_url", side_effect=lambda x: x), \
                 patch.object(client.urllib.request, "build_opener", return_value=opener):
             with self.assertRaises(client.ImageError) as caught:
@@ -97,7 +97,7 @@ class ImageClientTest(unittest.TestCase):
 
     def test_upstream_error_is_not_leaked_or_retried(self):
         opener = Mock()
-        opener.open.side_effect = client.urllib.error.HTTPError("https://gateway", 401, "Bearer secret", {}, None)
+        opener.open.side_effect = client.urllib.error.HTTPError("https://gateway", 401, "Bearer secret", {}, io.BytesIO(b"denied"))
         with patch.object(client.urllib.request, "build_opener", return_value=opener):
             with self.assertRaises(client.ImageError) as caught:
                 client.generate_image("https://gateway/v1", "secret", "gpt-image-2", "test", "/unused")
