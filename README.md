@@ -77,6 +77,8 @@ cd DSQQ
 
 下载失败重跑 `install`；启动超时重跑 `up`；导入失败查看数据目录中的 `import.log`，再重跑 `import-pack`。状态检查使用管理接口实际认证结果；QQ 在线不代表模型调用成功。
 
+`down` 后重建容器时，AstrBot 可能重新安装插件的 Python 依赖，需要联网；慢速网络可使用 `up --timeout 600` 延长等待。
+
 ## MCP、工具和人格
 
 准备 `search-mcp.json`（替换示例地址、认证信息）：
