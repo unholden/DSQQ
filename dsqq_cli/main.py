@@ -14,6 +14,7 @@ from urllib.parse import quote, urlencode
 from .config import initialize_files, new_config, render_model, validate_model, MODEL_ID
 from .runtime import AstrBot, Docker, NapCat, docker_context, run, wait_ready
 from .state import Installation, UserError, private_write, read_json, write_json
+from .images import image_command
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = Path.home() / "Library/Application Support/DSQQ"
@@ -349,6 +350,12 @@ def parser():
     p.add_argument("--voice", choices=("none", "doubao"), default="none")
     sub.add_parser("test-model", help="通过 AstrBot 测试模型（会发起真实 API 请求）")
     sub.add_parser("models", help="列出配置的模型（隐藏凭证）")
+    p = sub.add_parser("image", help="安装生图工具或测试生成图片")
+    actions = p.add_subparsers(dest="action", required=True)
+    q = actions.add_parser("install")
+    q.add_argument("--model", default="gpt-image-2")
+    q = actions.add_parser("test")
+    q.add_argument("--prompt", required=True, help="测试描述；仅保存图片，不发送 QQ 消息")
     p = sub.add_parser("mcp", help="管理 MCP 服务")
     actions = p.add_subparsers(dest="action", required=True)
     actions.add_parser("list")
@@ -421,6 +428,8 @@ def dispatch(inst, args):
               for item in providers if isinstance(item, dict)])
     elif command == "mcp":
         mcp(inst, args)
+    elif command == "image":
+        image_command(inst, args, REPO)
     elif command == "tools":
         tools_command(inst, args)
     elif command == "persona":

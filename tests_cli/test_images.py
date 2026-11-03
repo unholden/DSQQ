@@ -1,0 +1,153 @@
+import asyncio
+import base64
+import importlib
+import io
+import json
+from pathlib import Path
+import sys
+import tempfile
+import threading
+import types
+import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import AsyncMock, Mock, patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "plugins"))
+client = importlib.import_module("astrbot_plugin_dsqq_image.client")
+PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=")
+
+
+class ImageClientTest(unittest.TestCase):
+    def test_real_http_contract_and_base64_response(self):
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                requests.append((self.path, self.headers.get("Authorization"),
+                                 json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps({"data": [{"b64_json": base64.b64encode(PNG).decode()}]}).encode())
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as temp:
+                p = client.generate_image(f"http://127.0.0.1:{server.server_port}/v1", "secret", "gpt-image-2", "蓝色小鱼", temp)
+                self.assertEqual(p.read_bytes(), PNG)
+                self.assertEqual(p.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(requests, [("/v1/images/generations", "Bearer secret", {
+                "model": "gpt-image-2", "prompt": "蓝色小鱼", "n": 1, "size": "1024x1024"})])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_download_has_no_gateway_credentials(self):
+        opener = Mock()
+        opener.open.return_value = io.BytesIO(PNG)
+        with tempfile.TemporaryDirectory() as temp, patch.object(client, "public_image_url", side_effect=lambda x: x), \
+                patch.object(client.urllib.request, "build_opener", return_value=opener):
+            p = client.save_response({"data": [{"url": "https://cdn.example/image.png"}]}, temp)
+            self.assertEqual(p.read_bytes(), PNG)
+        req = opener.open.call_args.args[0]
+        self.assertIsNone(req.get_header("Authorization"))
+
+    def test_reject_private_urls_including_redirect(self):
+        private = [(2, 1, 6, "", ("127.0.0.1", 443))]
+        with patch.object(client.socket, "getaddrinfo", return_value=private):
+            with self.assertRaises(client.ImageError):
+                client.public_image_url("https://cdn.example/x")
+            with self.assertRaises(client.ImageError):
+                client.PublicRedirect().redirect_request(None, None, 302, "", {}, "https://cdn.example/x")
+        for url in ("http://example.com/x", "file:///etc/passwd", "https://user:secret@example.com/x"):
+            with self.assertRaises(client.ImageError):
+                client.public_image_url(url)
+
+    def test_gateway_redirect_does_not_forward_key(self):
+        with self.assertRaises(client.ImageError):
+            client.NoRedirect().redirect_request(None, None, 302, "", {}, "https://other.example")
+
+    def test_bad_or_oversized_results_are_not_saved(self):
+        with self.assertRaises(client.ImageError):
+            client.read_bounded(io.BytesIO(b"01234"), 4)
+        with tempfile.TemporaryDirectory() as temp:
+            for payload in ({}, {"data": []}, {"data": [{"b64_json": "!!!"}]},
+                            {"data": [{"b64_json": base64.b64encode(b"<html>error</html>").decode()}]}):
+                with self.assertRaises(client.ImageError):
+                    client.save_response(payload, temp)
+            self.assertEqual(list(Path(temp).iterdir()), [])
+
+    def test_upstream_error_is_not_leaked_or_retried(self):
+        opener = Mock()
+        opener.open.side_effect = client.urllib.error.HTTPError("https://gateway", 401, "Bearer secret", {}, None)
+        with patch.object(client.urllib.request, "build_opener", return_value=opener):
+            with self.assertRaises(client.ImageError) as caught:
+                client.generate_image("https://gateway/v1", "secret", "gpt-image-2", "test", "/unused")
+        self.assertNotIn("secret", str(caught.exception))
+        self.assertEqual(opener.open.call_count, 1)
+
+
+class ImagePluginTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        # Exercise the plugin's authorization/job lifecycle without starting AstrBot.
+        mods = {name: types.ModuleType(name) for name in (
+            "astrbot", "astrbot.api", "astrbot.api.event", "astrbot.api.star")}
+        mods["astrbot"].logger = Mock()
+        event_mod = mods["astrbot.api.event"]
+        event_mod.AstrMessageEvent = object
+        event_mod.filter = types.SimpleNamespace(llm_tool=lambda **kw: lambda f: f, command=lambda *a: lambda f: f)
+
+        class Star:
+            def __init__(self, context):
+                self.context = context
+
+        star = mods["astrbot.api.star"]
+        star.Star, star.Context = Star, object
+        star.StarTools = types.SimpleNamespace(get_data_dir=lambda name: "/unused")
+        with patch.dict(sys.modules, mods):
+            self.module = importlib.import_module("astrbot_plugin_dsqq_image.main")
+        context = Mock()
+        context.get_config.return_value = {"provider_sources": [{"id": "dsqq_source", "key": ["secret"], "api_base": "https://gateway/v1"}]}
+        self.plugin = self.module.DSQQImage(context, {})
+        self.event = Mock()
+        self.event.is_admin.return_value = True
+        self.event.send = AsyncMock()
+
+    async def asyncTearDown(self):
+        await self.plugin.terminate()
+
+    async def test_member_cannot_generate_or_read_credentials(self):
+        self.event.is_admin.return_value = False
+        self.assertIn("管理员", self.plugin.start(self.event, "draw"))
+        self.assertIsNone(self.plugin.job)
+        self.plugin.context.get_config.assert_not_called()
+
+    async def test_one_job_delivers_image_and_rejects_duplicate(self):
+        with patch.object(self.module, "generate_image", return_value=Path("/AstrBot/data/test.png")) as generate:
+            self.assertIn("已开始", self.plugin.start(self.event, "blue fish"))
+            self.assertIn("上一张", self.plugin.start(self.event, "blue fish"))
+            await self.plugin.job
+            self.assertEqual(generate.call_count, 1)
+            self.event.image_result.assert_called_once_with("/AstrBot/data/test.png")
+            self.event.send.assert_awaited_once_with(self.event.image_result.return_value)
+
+    async def test_failure_notifies_without_exposing_exception(self):
+        with patch.object(self.module, "generate_image", side_effect=RuntimeError("secret")):
+            self.plugin.start(self.event, "test")
+            await self.plugin.job
+        message = self.event.plain_result.call_args.args[0]
+        self.assertNotIn("secret", message)
+        self.event.send.assert_awaited_once()
+
+    async def test_command_keeps_full_prompt(self):
+        self.event.message_str = "/生图 a blue fish, white background"
+        with patch.object(self.plugin, "start", return_value="started") as start:
+            replies = [r async for r in self.plugin.image_command(self.event)]
+        start.assert_called_once_with(self.event, "a blue fish, white background")
+        self.assertEqual(len(replies), 1)

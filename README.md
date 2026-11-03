@@ -108,6 +108,21 @@ cd DSQQ
 
 `--tool` 不带名称表示禁用全部工具。人格文件中的 `{OWNER_QQ}` 会替换为主人 QQ；已有聊天可发 `/reset` 重新开始。支持远程 HTTP/SSE 和容器内 stdio MCP；stdio 的程序及路径必须存在于 **AstrBot 容器**。电脑能力默认 `none`。模型经 New API 使用工具时，上游必须完整支持 tool calls 及结果回传。
 
+## 可选：GPT Image 生图工具
+
+```bash
+./dsqq image install --model gpt-image-2
+./dsqq image test --prompt '一只戴宇航员头盔的蓝色小鱼，白色背景'
+```
+
+`image install` 安装随仓库提供的 `astrbot_plugin_dsqq_image`，只重启 AstrBot，保留 QQ 登录和聊天模型；复用 `dsqq_source` 的网关与 Key。更新插件代码后再次执行该命令即可。`image test` 会调用真实生图模型并打印容器内图片路径，仅保存文件，不发送 QQ 消息。
+
+QQ 管理员可发 `/生图 一只戴宇航员头盔的蓝色小鱼`，也可以直接说“帮我画一张……”，让聊天模型调用 `generate_image`。人格若设置了工具白名单，需要将 `generate_image` 加入白名单；默认大肥鱼人格允许全部可用工具。插件会在后台生成并把图片发到当前聊天，一次处理一张；初始仅管理员可用，其他用户不能触发生成。
+
+接口使用 `/v1/images/generations`（支持 URL / base64 返回），单张 1024×1024、最大 20 MB。网关必须支持该接口及模型；模型出现在 `/models` 中不等于生图接口一定可用。默认请求超时 300 秒，不自动重试，避免重复计费。生成图片保存在 `astrbot/data/plugin_data/astrbot_plugin_dsqq_image/`，后续生成时清理超过 7 天的图片。生图开始后重启或重载 AstrBot 会取消本次发送，但上游可能仍完成并计费。
+
+插件配置位于 `astrbot/data/config/astrbot_plugin_dsqq_image_config.json`，不另存 API Key；更换 DSQQ 网关后会跟随使用新配置。图片下载不携带网关凭证，并拒绝内网下载地址。
+
 ## 数据与隔离
 
 ```text

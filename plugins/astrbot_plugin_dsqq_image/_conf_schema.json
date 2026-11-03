@@ -1,0 +1,6 @@
+{
+  "enabled": {"description": "启用生图", "type": "bool", "default": true},
+  "model": {"description": "生图模型", "type": "string", "default": "gpt-image-2"},
+  "provider_source_id": {"description": "复用此模型提供商的网关地址与令牌", "type": "string", "default": "dsqq_source"},
+  "timeout_seconds": {"description": "单次生图请求超时（秒）", "type": "int", "default": 300}
+}
