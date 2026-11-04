@@ -55,3 +55,14 @@ QQ 历史记录中的图片文件名 MD5 与本地生成文件完全一致，服
 - 46 项测试在本机 Python 3.9 和 sg31 Python 3.14 通过，覆盖误报回归、延迟消息、历史接口不可用、旧消息/待发消息排除、取消、管理员权限和取图。
 - 在 sg31 已安装的 AstrBot 容器内，以真实 `aiocqhttp.ActionFailed` 异常、两张已有图片和只读取得的真实历史记录回放插件流程：两次均确认成功，通知次数为零；发送和模型调用均替换为 mock，真实 QQ 发送次数和生成次数均为零。
 - 安装后 AstrBot 管理接口正常、QQ 在线。遵照用户“已收到，修正误报”的要求，没有另发测试图片；实际后续发送耗时尚未重新测量。
+
+## 2026-11-04：Qwen3-TTS 本地按需语音
+
+- sg31：Apple M4、16 GB 内存、macOS 26.5.1；原生 Python 3.12、MLX Audio 0.6.4、MLX 0.32.4。
+- 模型：`mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit`，当前音色 Vivian，中文；这是模型内置音色，没有使用豆包权重或参考音频克隆。
+- 首轮短句生成耗时 5.19 秒，音频 4.72 秒、24 kHz，MLX 峰值分配约 4.39 GB（不是进程常驻内存指标）。
+- 独立虚拟环境和当前安装专用 LaunchAgent；登录自启，模型本地加载且设置 `HF_HUB_OFFLINE=1`。通过私有共享文件队列连接 AstrBot，不新增网络监听端口。
+- 69 项测试在本机和 sg31 通过，覆盖共享队列请求/结果、工作进程不可用、超时和取消不重试、请求过期、非法音色与文本边界。
+- 从已安装的 AstrBot 插件发起真实本地合成，只有 QQ `event.send` 替换为 mock：生成 5.68 秒 WAV，权限 600，NapCat 容器可以读取；真实 QQ 发送次数为零。试听文件另保存到本次工作区 outputs。
+- 验证 QQ 在线、原生语音 ready、生图/语音工具均启用且成员可用；全局自动 TTS 关闭，原有两个群白名单保留。
+- 运维：`voice local-install` 安装/恢复；`voice install --backend local` 切换；`voice local-stop` 停止并取消登录自启；`uninstall` 同时移除本安装的 LaunchAgent。`down` 仅停止容器。
