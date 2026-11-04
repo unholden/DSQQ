@@ -108,7 +108,15 @@ def start_local_voice(inst, repo):
     if run(['launchctl', 'print', domain + '/' + label]).returncode == 0:
         checked(['launchctl', 'bootout', domain + '/' + label])
     (queue / 'health.json').unlink(missing_ok=True)
-    checked(['launchctl', 'bootstrap', domain, plist])
+    # bootout may return before launchd releases the old service registration.
+    # A short bounded retry handles its transient EIO without changing domains.
+    for attempt in range(5):
+        result = run(['launchctl', 'bootstrap', domain, str(plist)])
+        if result.returncode == 0:
+            break
+        if attempt == 4 or 'Bootstrap failed: 5:' not in result.stderr:
+            raise UserError(inst.redact((result.stderr or result.stdout)[-1500:]))
+        time.sleep(1)
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
         h = read_json(queue / 'health.json')
