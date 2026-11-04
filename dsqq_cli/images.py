@@ -61,6 +61,9 @@ def image_command(inst, args, repo):
             path = inst.root / "astrbot/data/config" / (PLUGIN + "_config.json")
             config = read_json(path)
             config.update({"model": args.model, "provider_source_id": "dsqq_source"})
+            if args.group_members is not None:
+                config["allow_group_members"] = args.group_members == "on"
+            config.setdefault("allow_group_members", False)
             config.setdefault("enabled", True)
             config.setdefault("timeout_seconds", 300)
             write_json(path, config)
@@ -72,8 +75,9 @@ def image_command(inst, args, repo):
             api = AstrBot(inst)
             if not any(t.get("name") == "generate_image" for t in api.call("GET", "/tools")):
                 raise UserError("生图工具未加载，请查看 dsqq logs astrbot。")
-            api.call("PATCH", "/tools/generate_image/permission", {"permission": "admin"})
-        print("生图插件已安装（仅管理员）；QQ 可发 /生图 图片描述，或自然语言要求画图。")
+            api.call("PATCH", "/tools/generate_image/permission", {"permission": "member" if config["allow_group_members"] else "admin"})
+        scope = "管理员及群内 @机器人的成员" if config["allow_group_members"] else "仅管理员"
+        print(f"生图插件已安装（{scope}）；QQ 可发 /生图 图片描述，或自然语言要求画图。")
     else:
         # The secret stays inside the mounted config; do not put it in argv or stdout.
         script = '''import sys,json

@@ -2,6 +2,7 @@ import asyncio
 
 from astrbot import logger
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.message_components import At
 from astrbot.api.star import Context, Star, StarTools
 
 from .client import ImageError, generate_image
@@ -37,9 +38,20 @@ class DSQQImage(Star):
             raise ImageError("生图网关尚未配置，请先配置 DSQQ 模型网关。")
         return source["api_base"], key
 
+    def access_denied(self, event):
+        if event.is_admin():
+            return None
+        if self.config.get("allow_group_members", False) and event.get_group_id():
+            if any(isinstance(part, At) and str(part.qq) == str(event.get_self_id())
+                   for part in event.get_messages()):
+                return None
+            return "请在群里 @机器人，再发送生图或取图请求。"
+        return "生图工具仅供管理员或已开放群聊的成员使用。"
+
     def start(self, event, prompt):
-        if not event.is_admin():
-            return "生图工具目前仅供管理员使用。"
+        denied = self.access_denied(event)
+        if denied:
+            return denied
         if not self.config.get("enabled", True):
             return "生图工具已关闭。"
         prompt = prompt.strip()
@@ -57,7 +69,7 @@ class DSQQImage(Star):
     @filter.llm_tool(name="generate_image")
     async def image_tool(self, event: AstrMessageEvent, prompt: str):
         """当用户明确要求画图、生成图片或设计图像时调用，生成一张新图并发送到当前聊天。
-        仅管理员可用。不要用于搜索现有图片或发送表情包；不要自行生图。
+        管理员可用；开放群聊后，群成员 @机器人也可用。不要用于搜索现有图片或发送表情包；不要自行生图。
         本工具在后台生成，返回开始生成后不要重复调用，也不要声称已经完成。
 
         Args:
@@ -73,8 +85,9 @@ class DSQQImage(Star):
 
     @filter.command("取图")
     async def retrieve_command(self, event: AstrMessageEvent):
-        if not event.is_admin():
-            yield event.plain_result("取图仅供管理员使用。")
+        denied = self.access_denied(event)
+        if denied:
+            yield event.plain_result(denied)
             return
         if self.job and not self.job.done():
             yield event.plain_result("上一张图片还在处理，请稍等。")
@@ -132,7 +145,7 @@ class DSQQImage(Star):
                     return
             logger.warning(f"[dsqq_image] Keeping saved image for explicit retrieval ({type(exc).__name__}).")
         self.record_delivery(event, path, "saved")
-        await self.notify(event, "图片已做好并保存。发送「/取图」可以取回，不会重新生成。")
+        await self.notify(event, "图片已做好并保存。发送「/取图」（群聊请 @机器人）可以取回，不会重新生成。")
 
     async def notify(self, event, message):
         try:

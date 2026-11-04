@@ -354,6 +354,7 @@ def parser():
     actions = p.add_subparsers(dest="action", required=True)
     q = actions.add_parser("install")
     q.add_argument("--model", default="gpt-image-2")
+    q.add_argument("--group-members", choices=("on", "off"), help="允许群成员 @机器人生图；不指定则保留现状")
     q = actions.add_parser("test")
     q.add_argument("--prompt", required=True, help="测试描述；仅保存图片，不发送 QQ 消息")
     p = sub.add_parser("mcp", help="管理 MCP 服务")

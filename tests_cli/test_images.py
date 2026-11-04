@@ -112,8 +112,12 @@ class ImagePluginTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         # Exercise the plugin's authorization/job lifecycle without starting AstrBot.
         mods = {name: types.ModuleType(name) for name in (
-            "astrbot", "astrbot.api", "astrbot.api.event", "astrbot.api.star")}
+            "astrbot", "astrbot.api", "astrbot.api.event", "astrbot.api.star", "astrbot.api.message_components")}
         mods["astrbot"].logger = Mock()
+        class At:
+            def __init__(self, qq):
+                self.qq = qq
+        mods["astrbot.api.message_components"].At = At
         event_mod = mods["astrbot.api.event"]
         event_mod.AstrMessageEvent = object
         event_mod.filter = types.SimpleNamespace(llm_tool=lambda **kw: lambda f: f, command=lambda *a: lambda f: f)
@@ -136,6 +140,7 @@ class ImagePluginTest(unittest.IsolatedAsyncioTestCase):
         self.event.get_self_id.return_value = "42"
         self.event.get_sender_id.return_value = "7"
         self.event.get_group_id.return_value = ""
+        self.event.get_messages.return_value = []
         self.event.unified_msg_origin = "qq:private:7"
         self.event.bot.call_action = AsyncMock(return_value={"messages": []})
         self.temp = tempfile.TemporaryDirectory()
@@ -162,6 +167,43 @@ class ImagePluginTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("管理员", self.plugin.start(self.event, "draw"))
         self.assertIsNone(self.plugin.job)
         self.plugin.context.get_config.assert_not_called()
+
+    async def test_group_member_mention_can_generate_without_admin(self):
+        self.plugin.config["allow_group_members"] = True
+        self.event.is_admin.return_value = False
+        self.event.get_group_id.return_value = "88"
+        self.event.get_messages.return_value = [self.module.At(qq="42")]
+        with patch.object(self.module, "generate_image", return_value=self.path) as generate:
+            self.assertIn("已开始", await self.plugin.image_tool(self.event, "blue fish"))
+            await self.plugin.job
+        self.assertEqual(generate.call_count, 1)
+        self.event.send.assert_awaited_once()
+
+    async def test_open_group_access_rejects_private_and_unaddressed_requests(self):
+        self.plugin.config["allow_group_members"] = True
+        self.event.is_admin.return_value = False
+        for group, parts in (("", [self.module.At(qq="42")]), ("88", []),
+                             ("88", [self.module.At(qq="99")]), ("88", [self.module.At(qq="all")])):
+            self.event.get_group_id.return_value = group
+            self.event.get_messages.return_value = parts
+            self.assertNotIn("已开始", self.plugin.start(self.event, "fish"))
+        self.assertIsNone(self.plugin.job)
+        self.plugin.context.get_config.assert_not_called()
+
+    async def test_group_member_can_only_retrieve_own_image(self):
+        self.plugin.config["allow_group_members"] = True
+        self.event.is_admin.return_value = False
+        self.event.get_group_id.return_value = "88"
+        self.event.unified_msg_origin = "qq:group:88"
+        self.event.get_messages.return_value = [self.module.At(qq="42")]
+        delivery.save_receipt(self.plugin.folder, self.event, self.path, "sent")
+        self.event.get_sender_id.return_value = "8"
+        _ = [r async for r in self.plugin.retrieve_command(self.event)]
+        self.assertIsNone(self.plugin.job)
+        self.event.get_sender_id.return_value = "7"
+        _ = [r async for r in self.plugin.retrieve_command(self.event)]
+        await self.plugin.job
+        self.event.send.assert_awaited_once()
 
     async def test_one_job_delivers_image_and_rejects_duplicate(self):
         with patch.object(self.module, "generate_image", return_value=self.path) as generate:
