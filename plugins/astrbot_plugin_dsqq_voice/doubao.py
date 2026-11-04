@@ -88,6 +88,9 @@ def request_audio(text, voice, credentials_file, resource_id="seed-tts-2.0"):
     try:
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=45) as response:
             return parse_audio(response)
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        raise DoubaoError("豆包语音请求失败，请检查凭证和服务状态。") from None
     except (urllib.error.URLError, OSError):
         # Neither raw responses nor credential-bearing request objects enter logs.
         raise DoubaoError("豆包语音请求失败，请检查凭证和服务状态。") from None
