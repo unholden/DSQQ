@@ -15,6 +15,7 @@ from .config import initialize_files, new_config, render_model, validate_model, 
 from .runtime import AstrBot, Docker, NapCat, docker_context, run, wait_ready
 from .state import Installation, UserError, private_write, read_json, write_json
 from .images import image_command
+from .voice import voice_command
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = Path.home() / "Library/Application Support/DSQQ"
@@ -357,6 +358,10 @@ def parser():
     q.add_argument("--group-members", choices=("on", "off"), help="允许群成员 @机器人生图；不指定则保留现状")
     q = actions.add_parser("test")
     q.add_argument("--prompt", required=True, help="测试描述；仅保存图片，不发送 QQ 消息")
+    p = sub.add_parser("voice", help="安装按需语音工具")
+    actions = p.add_subparsers(dest="action", required=True)
+    q = actions.add_parser("install")
+    q.add_argument("--voice", default="zh-CN-XiaoxiaoNeural", help="Edge TTS 音色")
     p = sub.add_parser("mcp", help="管理 MCP 服务")
     actions = p.add_subparsers(dest="action", required=True)
     actions.add_parser("list")
@@ -431,6 +436,8 @@ def dispatch(inst, args):
         mcp(inst, args)
     elif command == "image":
         image_command(inst, args, REPO)
+    elif command == "voice":
+        voice_command(inst, args, REPO)
     elif command == "tools":
         tools_command(inst, args)
     elif command == "persona":

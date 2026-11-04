@@ -1,0 +1,8 @@
+name: astrbot_plugin_dsqq_voice
+display_name: DSQQ 按需语音
+desc: 明确要求时用中文女声回复；支持群成员 @机器人，普通聊天保持文字。
+version: v0.1.0
+author: unholden
+repo: https://github.com/unholden/DSQQ
+support_platforms:
+  - aiocqhttp

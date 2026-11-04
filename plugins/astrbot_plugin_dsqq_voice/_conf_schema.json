@@ -1,0 +1,4 @@
+{
+  "enabled": {"description": "启用按需语音工具", "type": "bool", "default": true},
+  "voice": {"description": "Edge TTS 音色", "type": "string", "default": "zh-CN-XiaoxiaoNeural"}
+}

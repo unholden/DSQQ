@@ -1,6 +1,6 @@
 name: astrbot_plugin_dsqq_image
 display_name: DSQQ 生图
-desc: 用当前 DSQQ 网关调用 gpt-image-2 生成图片，并发送到当前聊天。仅管理员可用。
+desc: 用当前 DSQQ 网关调用 gpt-image-2 生成图片，并发送到当前聊天。支持管理员及已开放群聊的成员。
 version: v0.1.3
 author: unholden
 repo: https://github.com/unholden/DSQQ
