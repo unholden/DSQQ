@@ -66,3 +66,10 @@ QQ 历史记录中的图片文件名 MD5 与本地生成文件完全一致，服
 - 从已安装的 AstrBot 插件发起真实本地合成，只有 QQ `event.send` 替换为 mock：生成 5.68 秒 WAV，权限 600，NapCat 容器可以读取；真实 QQ 发送次数为零。试听文件另保存到本次工作区 outputs。
 - 验证 QQ 在线、原生语音 ready、生图/语音工具均启用且成员可用；全局自动 TTS 关闭，原有两个群白名单保留。
 - 运维：`voice local-install` 安装/恢复；`voice install --backend local` 切换；`voice local-stop` 停止并取消登录自启；`uninstall` 同时移除本安装的 LaunchAgent。`down` 仅停止容器。
+
+## 2026-11-04：语音发送成功后的空响应误报
+
+- 根因：`send_voice` 成功发送后返回了成功字符串，触发额外模型轮次；模型遵循“不重复语音内容”的提示返回空文本，随后出现 `EmptyModelOutputError`。Edge 和本地 Qwen 后端均有相同日志，问题位于工具收尾流程。
+- 插件 v0.3.1：保留成功发送时的 `None` 返回值，由 AstrBot 的直接回复机制结束 agent loop；失败仍返回文字回退内容，不全局屏蔽空响应错误。
+- 69 项 CLI/插件测试通过。`tests_integration/test_voice_tool_loop.py` 在 sg31 实际 AstrBot v4.29.3 容器中运行真实工具执行器和完整 agent loop，模型边界回放第二轮错误，合成和 QQ 发送替换为 mock。旧版成功发送后产生错误，修复版仅请求一次模型、发送一次语音且正常结束；合成失败仍进入文字回退轮次，两项集成测试通过。
+- 集成测试不调用付费模型、不生成音频、不发送真实 QQ 消息。此处验证的是控制流，真实群聊体验由后续正常使用验证。

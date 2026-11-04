@@ -70,8 +70,10 @@ class DSQQVoice(Star):
         Args:
             text(string): 要朗读的自然语言内容，1–600 字；不含 Markdown、链接或舞台动作。
         """
-        result = await self.speak(event, text)
-        return result or "语音已发送到当前聊天，无需重复文字内容或再次调用工具。"
+        # AstrBot treats None as a direct reply and ends the agent loop. A success
+        # string would request another LLM turn, which can produce empty output
+        # because the requested answer has already been delivered as audio.
+        return await self.speak(event, text)
 
     @filter.command("语音")
     async def voice_command(self, event: AstrMessageEvent):

@@ -49,7 +49,7 @@ class VoicePluginTest(unittest.IsolatedAsyncioTestCase):
     async def test_group_member_explicit_tool_sends_one_record(self):
         with patch.object(self.main, "synthesize", new=AsyncMock(return_value=Path("/tmp/voice.wav"))) as synth:
             result = await self.plugin.voice_tool(self.event, "你好")
-        self.assertIn("语音已发送", result)
+        self.assertIsNone(result)
         synth.assert_awaited_once()
         self.event.send.assert_awaited_once()
         record = self.event.chain_result.call_args.args[0][0]
@@ -80,7 +80,7 @@ class VoicePluginTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_synthesis_failure_falls_back_to_original_text(self):
         with patch.object(self.main, "synthesize", new=AsyncMock(side_effect=TimeoutError("private URL"))) as synth:
-            result = await self.plugin.speak(self.event, "你好")
+            result = await self.plugin.voice_tool(self.event, "你好")
         self.assertEqual(result, "这次先用文字回复：\n你好")
         self.assertFalse(self.plugin.busy)
         synth.assert_awaited_once()
