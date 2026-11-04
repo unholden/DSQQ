@@ -16,7 +16,7 @@ from .runtime import AstrBot, Docker, NapCat, docker_context, run, wait_ready
 from .state import Installation, UserError, private_write, read_json, write_json
 from .images import image_command
 from .voice import voice_command
-from .local_voice import install_local_voice, stop_local_voice
+from .local_voice import install_local_voice, stop_local_voice, configure_local_clone
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = Path.home() / "Library/Application Support/DSQQ"
@@ -373,6 +373,10 @@ def parser():
     q.add_argument("--credentials-file", type=Path, help="豆包语音凭证 JSON 文件（不会打印密钥）")
     q.add_argument("--resource-id", help="豆包语音资源 ID，默认 seed-tts-2.0")
     actions.add_parser("local-install", help="安装 Mac 原生 Qwen3-TTS 服务")
+    q = actions.add_parser("local-clone", help="配置固定参考音色并设为默认语音")
+    q.add_argument("--name", default="reference", help="固定音色 ID")
+    q.add_argument("--audio", type=Path, required=True)
+    q.add_argument("--text-file", type=Path, required=True)
     actions.add_parser("local-stop", help="停止本地语音并取消登录自启")
     p = sub.add_parser("mcp", help="管理 MCP 服务")
     actions = p.add_subparsers(dest="action", required=True)
@@ -451,6 +455,10 @@ def dispatch(inst, args):
     elif command == "voice":
         if args.action == "local-install":
             install_local_voice(inst, args, REPO)
+        elif args.action == "local-clone":
+            configure_local_clone(inst, args, REPO)
+            args.backend, args.voice = "local", args.name
+            voice_command(inst, args, REPO)
         elif args.action == "local-stop":
             stop_local_voice(inst)
         else:

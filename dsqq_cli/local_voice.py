@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import platform
 import plistlib
+import re
 import shutil
 import time
 
@@ -10,6 +11,7 @@ from .runtime import run
 from .state import UserError, read_json, write_json, private_write
 
 MODEL = 'mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit'
+CLONE_MODEL = 'mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit'
 
 
 def install_local_voice(inst, args, repo):
@@ -33,7 +35,66 @@ def install_local_voice(inst, args, repo):
     checked([python, '-c', 'from huggingface_hub import snapshot_download;import sys;snapshot_download(sys.argv[1],local_dir=sys.argv[2])', MODEL, root / 'model'], 1200)
     queue = inst.root / 'astrbot/data/plugin_data/astrbot_plugin_dsqq_voice/mlx_jobs'
     queue.mkdir(parents=True, exist_ok=True, mode=0o700)
-    write_json(root / 'worker.json', {'model_path': str(root / 'model'), 'jobs_dir': str(queue)})
+    # Reinstalling the runtime must retain a configured reference voice.
+    if not (root / 'worker.json').exists():
+        write_json(root / 'worker.json', {'model_path': str(root / 'model'), 'jobs_dir': str(queue)})
+    start_local_voice(inst, repo)
+
+
+def configure_local_clone(inst, args, repo):
+    root = inst.root / 'mlx-voice'
+    python = root / 'venv/bin/python'
+    if not python.is_file() or not (root / 'worker.json').is_file():
+        raise UserError('请先运行 dsqq voice local-install。')
+    if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]{0,63}', args.name):
+        raise UserError('音色名称须为字母开头的英文、数字、下划线或连字符。')
+    if not args.audio.is_file() or not args.text_file.is_file():
+        raise UserError('参考音频或转写文本文件不存在。')
+    text = args.text_file.read_text(encoding='utf-8-sig').strip()
+    if not text:
+        raise UserError('参考文本不能为空。')
+    model = root / 'clone-base-0.6b-8bit'
+    result = run([str(python), '-c',
+        'from huggingface_hub import snapshot_download;import sys;snapshot_download(sys.argv[1],local_dir=sys.argv[2])',
+        CLONE_MODEL, str(model)], timeout=1200)
+    if result.returncode:
+        raise UserError('克隆模型下载失败：' + inst.redact(result.stderr[-1000:]))
+    # Validate/decode before changing a running service. Store a private copy so
+    # removing the original download does not break future speech generation.
+    import tempfile
+    references = root / 'references'
+    references.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, target = tempfile.mkstemp(prefix=args.name + '-', suffix='.wav', dir=references)
+    os.close(fd)
+    audio = Path(target)
+    result = run([str(python), '-c',
+        'import soundfile as sf,sys; a,s=sf.read(sys.argv[1]);'
+        'assert a.size>0; sf.write(sys.argv[2],a,s,subtype="PCM_16")',
+        str(args.audio.resolve()), str(audio)])
+    if result.returncode:
+        audio.unlink(missing_ok=True)
+        raise UserError('参考音频无法读取；请先提取为 WAV。')
+    previous = read_json(root / 'worker.json')
+    config = {**previous, 'mode': 'clone', 'model_path': str(model),
+              'voice': args.name, 'reference_audio': str(audio), 'reference_text': text}
+    write_json(root / 'worker.json', config)
+    try:
+        start_local_voice(inst, repo)
+    except Exception:
+        write_json(root / 'worker.json', previous)
+        start_local_voice(inst, repo)
+        audio.unlink(missing_ok=True)
+        raise
+
+
+def start_local_voice(inst, repo):
+    root = inst.root / 'mlx-voice'
+    python = root / 'venv/bin/python'
+    queue = Path(read_json(root / 'worker.json')['jobs_dir'])
+    def checked(argv):
+        result = run([str(a) for a in argv])
+        if result.returncode:
+            raise UserError(inst.redact((result.stderr or result.stdout)[-1500:]))
     label = 'net.machinepulse.dsqq.voice.' + inst.config['project']
     plist = Path.home() / 'Library/LaunchAgents' / (label + '.plist')
     plist.parent.mkdir(parents=True, exist_ok=True)

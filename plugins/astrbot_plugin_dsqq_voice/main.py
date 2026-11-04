@@ -64,7 +64,7 @@ class DSQQVoice(Star):
     @filter.llm_tool(name="send_voice")
     async def voice_tool(self, event: AstrMessageEvent, text: str):
         """仅在用户明确要求语音回复、朗读或说一句话时调用；普通聊天必须保持文字回复。
-        生成语音并发送到当前聊天。群成员需要 @机器人。不是语音识别工具，不支持唱歌或克隆声音。
+        使用已配置的音色生成语音并发送到当前聊天。群成员需要 @机器人。不支持语音识别、唱歌或临时指定参考音频。
         成功后不要重复调用，也不要再复述同一段文字；失败时按返回内容改用文字，不要再次调用。
 
         Args:

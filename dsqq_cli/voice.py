@@ -22,6 +22,8 @@ def voice_command(inst, args, repo):
         if health.get("status") != "ready" or time.time() - health.get("updated_at", 0) > 10:
             raise UserError("本地语音服务未就绪，请先运行 dsqq voice local-install。")
     voice = args.voice or (config.get("voice") if config.get("backend", "edge") == backend else None) or default_voice
+    if backend == "local" and health.get("voices") and voice.lower() not in health["voices"]:
+        raise UserError("此本地语音服务不支持该音色：" + voice)
     credentials = None
     credential_target = inst.root / "astrbot/data/plugin_data" / PLUGIN / "doubao_credentials.json"
     if backend == "doubao":

@@ -17,11 +17,11 @@ def atomic_json(path, value):
     os.replace(temp, path)
 
 
-def validate_job(job):
+def validate_job(job, voices=VOICES):
     text, voice = job.get('text'), job.get('voice')
     if not isinstance(text, str) or not 1 <= len(text.strip()) <= 600:
         raise ValueError('Invalid text')
-    if not isinstance(voice, str) or voice.lower() not in VOICES:
+    if not isinstance(voice, str) or voice.lower() not in voices:
         raise ValueError('Invalid voice')
     age = time.time() - float(job.get('created_at', 0))
     if not -5 <= age < 180:
@@ -29,19 +29,36 @@ def validate_job(job):
     return text.strip(), voice
 
 
+def generate_audio(model, config, text, voice):
+    if config.get('mode') == 'clone':
+        return model.generate(
+            text=text, lang_code='Chinese',
+            ref_audio=config['reference_audio'],
+            ref_text=config['reference_text'], max_tokens=4096)
+    return model.generate_custom_voice(
+        text=text, speaker=voice, language='Chinese', max_tokens=4096)
+
+
 def main():
     config = json.loads(Path(sys.argv[1]).read_text())
+    voices = {config['voice'].lower()} if config.get('mode') == 'clone' else VOICES
     folder = Path(config['jobs_dir'])
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     health = folder / 'health.json'
     def state(status):
-        atomic_json(health, {'status': status, 'updated_at': time.time(), 'pid': os.getpid()})
+        atomic_json(health, {'status': status, 'updated_at': time.time(), 'pid': os.getpid(),
+                            'voices': sorted(voices), 'mode': config.get('mode', 'preset')})
     state('loading')
     from mlx_audio.tts.utils import load_model
     import mlx.core as mx
     import numpy as np
     import soundfile as sf
     model = load_model(config['model_path'])
+    if config.get('mode') == 'clone':
+        if model.config.tts_model_type != 'base' or not model.speech_tokenizer.has_encoder:
+            raise ValueError('Voice cloning requires a Base model with reference encoder')
+        if not Path(config['reference_audio']).is_file() or not config['reference_text'].strip():
+            raise ValueError('Missing voice reference')
     # A crashed worker never silently retries a claimed request.
     for old in folder.glob('*.working'):
         atomic_json(folder / (old.stem + '.result.json'), {'ok': False})
@@ -66,9 +83,9 @@ def main():
             wav = folder / (job_id + '.wav')
             started = time.monotonic()
             try:
-                text, voice = validate_job(json.loads(working.read_text()))
+                text, voice = validate_job(json.loads(working.read_text()), voices)
                 state('busy')
-                outputs = list(model.generate_custom_voice(text=text, speaker=voice, language='Chinese', max_tokens=4096))
+                outputs = list(generate_audio(model, config, text, voice))
                 audio = mx.concatenate([o.audio for o in outputs])
                 mx.eval(audio)
                 if not len(audio):

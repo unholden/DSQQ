@@ -149,6 +149,15 @@ Apple Silicon Mac 本地合成（不需要云端语音 Key）：
 
 `local-install` 用独立 Python 3.12 环境安装 MLX Audio，下载 Qwen3-TTS 0.6B CustomVoice 8bit，并创建当前安装专用的用户 LaunchAgent。模型在 macOS 上使用 GPU；容器通过私有共享文件队列请求合成，无额外监听端口。默认 Vivian 中文女声，首次下载后推理离线；这是内置音色，不是豆包官方音色或参考音频克隆。使用 `/语音` 或 `send_voice` 的方式不变，失败仍回退文字。`uninstall` 会一并停用该原生服务，`down` 只停止容器。
 
+配置固定参考音色（零样本克隆，无需训练）：
+
+```bash
+./dsqq voice local-clone --name Taozijiang \
+  --audio /绝对路径/reference.wav --text-file /绝对路径/ref_text.txt
+```
+
+此命令下载 0.6B Base 8bit 模型，将参考 WAV 私有复制到安装目录，保存对应文本，重启原生服务并设为默认按需语音。原始文件删除后仍可使用；`local-install` 重装保留参考音色配置。克隆模式只接受已配置的音色 ID，不在单个请求中切换内置音色或接收任意参考文件。模型、参考音频和文本只在本机处理。
+
 切换到豆包语音合成 2.0：准备一个权限为 `600` 的凭证 JSON 文件，新版填 `{"api_key":"你的豆包语音 API Key"}`；旧版填 `{"app_id":"你的 APP ID","access_token":"你的 Access Token"}`。执行：
 
 ```bash
