@@ -40,7 +40,11 @@ class DSQQVoice(Star):
             return "上一条语音还在处理，请稍等。"
         self.busy = True
         try:
-            path = await synthesize(text, self.folder, self.config.get("voice", "zh-CN-XiaoxiaoNeural"))
+            path = await synthesize(
+                text, self.folder, self.config.get("voice", "zh-CN-XiaoxiaoNeural"),
+                backend=self.config.get("backend", "edge"),
+                credentials_file=self.config.get("credentials_file", ""),
+                resource_id=self.config.get("resource_id", "seed-tts-2.0"))
             try:
                 await event.send(event.chain_result([Record.fromFileSystem(str(path), text=text)]))
             except Exception as exc:

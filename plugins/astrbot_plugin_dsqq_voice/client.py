@@ -1,4 +1,4 @@
-"""Bounded Edge synthesis with files shared with NapCat."""
+"""Bounded speech synthesis with files shared with NapCat."""
 import asyncio
 import os
 from pathlib import Path
@@ -7,8 +7,11 @@ import uuid
 
 import edge_tts
 
+from .doubao import request_audio
 
-async def synthesize(text, folder, voice="zh-CN-XiaoxiaoNeural", timeout=45):
+
+async def synthesize(text, folder, voice="zh-CN-XiaoxiaoNeural", timeout=45, *,
+                     backend="edge", credentials_file="", resource_id="seed-tts-2.0"):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     for old in folder.glob("dsqq-voice-*.*"):
@@ -19,7 +22,14 @@ async def synthesize(text, folder, voice="zh-CN-XiaoxiaoNeural", timeout=45):
     process = None
     try:
         mp3.touch(mode=0o600)
-        await asyncio.wait_for(edge_tts.Communicate(text, voice=voice).save(str(mp3)), timeout)
+        if backend == "doubao":
+            audio = await asyncio.wait_for(asyncio.to_thread(
+                request_audio, text, voice, credentials_file, resource_id), 65)
+            mp3.write_bytes(audio)
+        elif backend == "edge":
+            await asyncio.wait_for(edge_tts.Communicate(text, voice=voice).save(str(mp3)), timeout)
+        else:
+            raise RuntimeError("Unknown speech backend")
         if not mp3.stat().st_size:
             raise RuntimeError("Speech response was empty")
         wav.touch(mode=0o600)

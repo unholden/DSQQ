@@ -1,4 +1,31 @@
 {
-  "enabled": {"description": "启用按需语音工具", "type": "bool", "default": true},
-  "voice": {"description": "Edge TTS 音色", "type": "string", "default": "zh-CN-XiaoxiaoNeural"}
+  "enabled": {
+    "description": "启用按需语音工具",
+    "type": "bool",
+    "default": true
+  },
+  "voice": {
+    "description": "服务对应的音色 ID",
+    "type": "string",
+    "default": "zh-CN-XiaoxiaoNeural"
+  },
+  "backend": {
+    "description": "语音服务",
+    "type": "string",
+    "options": [
+      "edge",
+      "doubao"
+    ],
+    "default": "edge"
+  },
+  "credentials_file": {
+    "description": "豆包语音凭证 JSON 文件的容器内路径",
+    "type": "string",
+    "default": ""
+  },
+  "resource_id": {
+    "description": "豆包语音资源 ID",
+    "type": "string",
+    "default": "seed-tts-2.0"
+  }
 }

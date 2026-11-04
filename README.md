@@ -137,6 +137,15 @@ QQ 管理员可发 `/生图 一只戴宇航员头盔的蓝色小鱼`，也可以
 
 使用 Edge TTS，不需要额外 API Key，默认“小晓”中文女声。安装后普通聊天保持文字；只有明确要求语音时才调用 `send_voice`。群成员需要通过已有会话白名单并 @机器人，可说“@机器人 用语音回答：今天心情怎么样”，或使用“@机器人 /语音 大家早上好”。管理员也可在私聊使用。人格若配置了工具白名单，需加入 `send_voice`。
 
+切换到豆包语音合成 2.0：准备一个权限为 `600` 的凭证 JSON 文件，新版填 `{"api_key":"你的豆包语音 API Key"}`；旧版填 `{"app_id":"你的 APP ID","access_token":"你的 Access Token"}`。执行：
+
+```bash
+./dsqq voice install --backend doubao --credentials-file /绝对路径/doubao.json
+# 指定音色：追加 --voice 音色ID；默认 zh_female_vv_uranus_bigtts
+```
+
+豆包使用 [官方 V3 HTTP 接口](https://docs.volcengine.com/docs/doubao-voice/http-chunked-sse-unidirectional-streaming-v3?lang=zh)，资源默认 `seed-tts-2.0`，可用 `--resource-id` 显式指定。凭证复制到安装数据目录，权限 `600`，不写入仓库或输出；没有有效凭证文件时安装命令会在停止服务之前退出。不指定 `--backend` 或 `--voice` 时保留已有设置；切回 Edge 使用 `--backend edge`。真实合成还需要账号已开通对应服务及音色权限。
+
 每次最多 600 字，一次处理一条，语音生成或发送异常时回退到同内容文字，不自动重试。音频在共享数据目录保存 24 小时，后续合成时清理。这里只配置语音输出，不启用语音识别。安装只重启 AstrBot，并关闭全局自动 TTS；保留聊天模型、生图和群聊权限。
 
 ## 数据与隔离
