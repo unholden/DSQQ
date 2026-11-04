@@ -15,6 +15,12 @@ def voice_command(inst, args, repo):
     config = read_json(path)
     backend = getattr(args, "backend", None) or config.get("backend", "edge")
     default_voice = "zh_female_vv_uranus_bigtts" if backend == "doubao" else "zh-CN-XiaoxiaoNeural"
+    if backend == "local":
+        default_voice = "Vivian"
+        import time
+        health = read_json(inst.root / "astrbot/data/plugin_data" / PLUGIN / "mlx_jobs/health.json")
+        if health.get("status") != "ready" or time.time() - health.get("updated_at", 0) > 10:
+            raise UserError("本地语音服务未就绪，请先运行 dsqq voice local-install。")
     voice = args.voice or (config.get("voice") if config.get("backend", "edge") == backend else None) or default_voice
     credentials = None
     credential_target = inst.root / "astrbot/data/plugin_data" / PLUGIN / "doubao_credentials.json"

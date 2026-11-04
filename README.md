@@ -137,6 +137,18 @@ QQ 管理员可发 `/生图 一只戴宇航员头盔的蓝色小鱼`，也可以
 
 使用 Edge TTS，不需要额外 API Key，默认“小晓”中文女声。安装后普通聊天保持文字；只有明确要求语音时才调用 `send_voice`。群成员需要通过已有会话白名单并 @机器人，可说“@机器人 用语音回答：今天心情怎么样”，或使用“@机器人 /语音 大家早上好”。管理员也可在私聊使用。人格若配置了工具白名单，需加入 `send_voice`。
 
+Apple Silicon Mac 本地合成（不需要云端语音 Key）：
+
+```bash
+./dsqq voice local-install
+./dsqq voice install --backend local --voice Vivian
+./dsqq status --json
+# 停止原生服务并取消登录自启：
+./dsqq voice local-stop
+```
+
+`local-install` 用独立 Python 3.12 环境安装 MLX Audio，下载 Qwen3-TTS 0.6B CustomVoice 8bit，并创建当前安装专用的用户 LaunchAgent。模型在 macOS 上使用 GPU；容器通过私有共享文件队列请求合成，无额外监听端口。默认 Vivian 中文女声，首次下载后推理离线；这是内置音色，不是豆包官方音色或参考音频克隆。使用 `/语音` 或 `send_voice` 的方式不变，失败仍回退文字。`uninstall` 会一并停用该原生服务，`down` 只停止容器。
+
 切换到豆包语音合成 2.0：准备一个权限为 `600` 的凭证 JSON 文件，新版填 `{"api_key":"你的豆包语音 API Key"}`；旧版填 `{"app_id":"你的 APP ID","access_token":"你的 Access Token"}`。执行：
 
 ```bash

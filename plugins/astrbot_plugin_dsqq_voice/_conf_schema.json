@@ -14,7 +14,8 @@
     "type": "string",
     "options": [
       "edge",
-      "doubao"
+      "doubao",
+      "local"
     ],
     "default": "edge"
   },

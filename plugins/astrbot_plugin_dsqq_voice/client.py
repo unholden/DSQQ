@@ -8,10 +8,13 @@ import uuid
 import edge_tts
 
 from .doubao import request_audio
+from .local import synthesize_local
 
 
 async def synthesize(text, folder, voice="zh-CN-XiaoxiaoNeural", timeout=45, *,
                      backend="edge", credentials_file="", resource_id="seed-tts-2.0"):
+    if backend == "local":
+        return await synthesize_local(text, folder, voice)
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     for old in folder.glob("dsqq-voice-*.*"):

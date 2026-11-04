@@ -16,6 +16,7 @@ from .runtime import AstrBot, Docker, NapCat, docker_context, run, wait_ready
 from .state import Installation, UserError, private_write, read_json, write_json
 from .images import image_command
 from .voice import voice_command
+from .local_voice import install_local_voice, stop_local_voice
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT = Path.home() / "Library/Application Support/DSQQ"
@@ -138,6 +139,10 @@ def status(inst, args):
             "offline" if qq.get("isOffline") else "need_scan" if qq.get("qrcodeurl") else "starting")
     except UserError:
         pass
+    health = read_json(inst.root / "astrbot/data/plugin_data/astrbot_plugin_dsqq_voice/mlx_jobs/health.json")
+    if health:
+        age = time.time() - health.get("updated_at", 0)
+        result["local_voice"] = health.get("status", "unknown") if age < (180 if health.get("status") == "busy" else 10) else "unavailable"
     if args.json:
         dump(result)
     else:
@@ -145,6 +150,8 @@ def status(inst, args):
             print(f"{row['Service']}: {row['State']}")
         print(f"AstrBot 管理 API: {'ready' if result['astrbot_api'] else 'unavailable'}")
         print(f"QQ: {result['qq']}（QQ 在线不代表模型 API 已验证；可运行 test-model）")
+        if "local_voice" in result:
+            print("本地语音: " + result["local_voice"])
     return 0 if result["astrbot_api"] and result["qq"] == "online" else 1
 
 
@@ -362,9 +369,11 @@ def parser():
     actions = p.add_subparsers(dest="action", required=True)
     q = actions.add_parser("install")
     q.add_argument("--voice", help="服务对应的音色 ID；不传则保留已有音色")
-    q.add_argument("--backend", choices=("edge", "doubao"), help="语音服务；不传则保留现状")
+    q.add_argument("--backend", choices=("edge", "doubao", "local"), help="语音服务；不传则保留现状")
     q.add_argument("--credentials-file", type=Path, help="豆包语音凭证 JSON 文件（不会打印密钥）")
     q.add_argument("--resource-id", help="豆包语音资源 ID，默认 seed-tts-2.0")
+    actions.add_parser("local-install", help="安装 Mac 原生 Qwen3-TTS 服务")
+    actions.add_parser("local-stop", help="停止本地语音并取消登录自启")
     p = sub.add_parser("mcp", help="管理 MCP 服务")
     actions = p.add_subparsers(dest="action", required=True)
     actions.add_parser("list")
@@ -440,7 +449,12 @@ def dispatch(inst, args):
     elif command == "image":
         image_command(inst, args, REPO)
     elif command == "voice":
-        voice_command(inst, args, REPO)
+        if args.action == "local-install":
+            install_local_voice(inst, args, REPO)
+        elif args.action == "local-stop":
+            stop_local_voice(inst)
+        else:
+            voice_command(inst, args, REPO)
     elif command == "tools":
         tools_command(inst, args)
     elif command == "persona":
@@ -449,6 +463,7 @@ def dispatch(inst, args):
         if args.purge and not args.yes:
             raise UserError(f"彻底删除 {inst.root} 的配置、聊天与 QQ 登录数据需要 --purge --yes。")
         docker.check()
+        stop_local_voice(inst)
         docker.compose("down")
         if args.purge:
             # Only delete a validated DSQQ root, never arbitrary user directories.
